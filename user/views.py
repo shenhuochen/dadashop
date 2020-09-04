@@ -12,8 +12,9 @@ import json
 from django.views import View
 from .tasks import send_active_email_celery
 from dtoken.views import make_token
-from .models import UserProfile, Address
+from .models import UserProfile, Address,WeiBoProfile
 from tools.logging_dec import logging_check
+from django.db import transaction
 
 
 # Create your views here.
@@ -76,10 +77,10 @@ def user_active(request):
     try:
         user = UserProfile.objects.get(username=username)
     except Exception as e:
-        return JsonResponse({'code': 10106, 'error': ' get user is error!!'})
+        return JsonResponse({'code': 10106, 'error': 'get user is error!!'})
     user.is_active = True
     user.save()
-    cache.delete('email_active_%s' % (username))
+    cache.delete('email_active_%s'%(username))
     return JsonResponse({'code': 200, 'data': "ok"})
 
 
@@ -192,25 +193,62 @@ def oauth_url(request):
     print(url)
     return JsonResponse({'code':200,'oauth_url':url})
 def oauth_token(request):
-    code= request.GET.get('code')
-    token_url='https://api.weibo.com/oauth2/access_token'
-    req_data ={
-        'client_id':settings.WEIBO_CLIENT_ID,
-        'client_secret':settings.WEIBO_CLIENT_SECRET,
-        'grant_type':'authorization_code',
-        'redirect_uri': settings.WEIBO_REDIRECT_URL,
-        "code":code
-    }
-    response=requests.post(token_url,data=req_data)
-    if response.status_code ==200:
-        res_data=json.loads(response.text)
-    else:
-        print('change code error %s'%(response.status_code))
-        return JsonResponse({'code':10108,'error':'weibo error'})
-    if res_data.get('error'):
-        print(res_data.get('error'))
-        return JsonResponse({'code': 10108, 'error': 'weibo error'})
-    print(res_data)
+    if request.method =="GET":
+        code= request.GET.get('code')
+        token_url='https://api.weibo.com/oauth2/access_token'
+        req_data ={
+            'client_id':settings.WEIBO_CLIENT_ID,
+            'client_secret':settings.WEIBO_CLIENT_SECRET,
+            'grant_type':'authorization_code',
+            'redirect_uri': settings.WEIBO_REDIRECT_URL,
+            "code":code
+        }
+        response=requests.post(token_url,data=req_data)
+        if response.status_code ==200:
+            res_data=json.loads(response.text)
+        else:
+            print('change code error %s'%(response.status_code))
+            return JsonResponse({'code':10108,'error':'weibo error'})
+        if res_data.get('error'):
+            print(res_data.get('error'))
+            return JsonResponse({'code': 10108, 'error': 'weibo error'})
+        print(res_data)
+        weibo_uid = res_data['uid']
+        access_token = res_data['access_token']
+        try:
+            weibo_user =WeiBoProfile.objects.get(wuid=weibo_uid)
+        except Exception as e:
+            WeiBoProfile.objects.create(access_token=access_token,wuid=weibo_uid)
+            return JsonResponse({'code':201,'uid':weibo_uid})
+        else:
+            user=weibo_user.user_profile
+            if user:
+                token =make_token(user.username)
+                return JsonResponse({'code':200,'username':user.username,'token':token.decode()})
+            else:
+                return JsonResponse({'code':201,'uid':weibo_uid})
+    elif request.method =='POST':
+        data = json.loads(request.body)
+        uid =data['uid']
+        username=data['username']
+        password =data['password']
+        phone=data['phone']
+        email =data['email']
+        m= hashlib.md5()
+        m.update(password.encode())
+        try:
+            with transaction.atomic():
+                user=UserProfile.objects.create(username=username,password=m.hexdigest(),email=email,phone=phone)
+                weibo_user=WeiBoProfile.objects.get(wuid=uid)
+                weibo_user.user_profile= user
+                weibo_user.save()
+        except Exception as e:
+            return JsonResponse({'code':10110,'error':'bind register error'})
+        token =make_token(username)
+        return JsonResponse({'code':200,'username':username,'token':token.decode()})
+
+
+
 
     return JsonResponse({'code':200})
 

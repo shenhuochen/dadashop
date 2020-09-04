@@ -27,3 +27,12 @@ class Address(models.Model):
     is_active = models.BooleanField(verbose_name='是否删除',default=True)
     def __str__(self):
         return '%s,%s,%s,%s'%(self.id,self.receiver,self.address,self.is_default)
+
+
+class WeiBoProfile(models.Model):
+    user_profile = models.OneToOneField(UserProfile,null=True,on_delete=models.CASCADE)
+    wuid = models.CharField(max_length=10,verbose_name='微博uid')
+    access_token =models.CharField(verbose_name='微博授权令牌',max_length=32)
+    class Meta:
+        db_table ='user_weibo_profile'
+
